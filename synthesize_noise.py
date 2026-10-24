@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+import argparse
 
 
 LEVELS = {
@@ -11,35 +12,50 @@ LEVELS = {
 }
 
 def degrade(img, alpha, sigma, blur):
-    gamma = 1.0/alpha
-    out = np.power(img/255.0, gamma) * 255
-    if sigma > 0:
-        out = out + np.random.normal(0, sigma, out.shape)
-    out = np.clip(out, 0, 255).astype(np.uint8)
+    out = img.astype(np.float32)
     if blur > 0:
+        if blur % 2 == 0: # odd kernel to avoid half-pixel shift
+            blur += 1            
         k = np.zeros((blur, blur), np.float32)
         k[blur //2, :] = 1.0/blur
         out = cv2.filter2D(out, -1, k)
+    # gamma curve is kept to match LDFE-SLAM (no linear exporsure)
+    gamma = 1.0/alpha
+    out = np.power(out / 255.0, gamma) * 255.0
+    # sensor reads npise last, gaussian is kept to match LDFE SLAM
+    if sigma > 0:
+        out = out + np.random.normal(0, sigma, out.shape)
+    out = np.clip(out, 0, 255).astype(np.uint8)
     return out 
 
-src_dir = "/home/anushcka/datasets/euroc/MH_01_easy/mav0/cam0/data/"
-out_dir = "/home/anushcka/datasets/euroc/synthesized/MH_01"
+# src_dir = "/home/anushcka/datasets/euroc/MH_01_easy/mav0/cam0/data/"
+# out_dir = "/home/anushcka/datasets/euroc/synthesized/MH_01"
 # N = 150
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--src", required=True, help="folder of input frames (cam0/data)")
+    ap.add_argument("--out", required=True,help="output folder")
+    ap.add_argument("--seed", type=int, default=0, help="random seed for reproducibility")
+    args = ap.parse_args()
+    np.random.seed(args.seed)
 
-frames = sorted(os.listdir(src_dir))
+    frames = sorted(os.listdir(args.src))
 
-for level, p in LEVELS.items():
-    os.makedirs(os.path.join(out_dir, level), exist_ok=True)
+    for level in LEVELS:
+        os.makedirs(os.path.join(args.out, level), exist_ok=True)
 
-for fname in frames:
-    img = cv2.imread(os.path.join(src_dir, fname), cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        print("skip:", fname)
-        continue
-    for level, p in LEVELS.items():
-        degraded = degrade(img, p["alpha"], p["sigma"], p["blur"])
-        cv2.imwrite(os.path.join(out_dir, level, fname), degraded)
-print("done:", len(frames), "frames x", len(LEVELS), "levels")
+    for i, fname in enumerate(frames):
+        img = cv2.imread(os.path.join(args.src, fname), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            print("skip:", fname)
+            continue
+        for level, p in LEVELS.items():
+            degraded = degrade(img, p["alpha"], p["sigma"], p["blur"])
+            cv2.imwrite(os.path.join(args.out, level, fname), degraded)
+    print("done:", len(frames), "frames x", len(LEVELS), "levels: ", args.out)
+
+if __name__== "__main__":
+    main()
 
 # img = cv2.imread("/home/anushcka/datasets/euroc/MH_01_easy/mav0/cam0/data/1403636579763555584.png", cv2.IMREAD_GRAYSCALE)
 # if img is not None:
